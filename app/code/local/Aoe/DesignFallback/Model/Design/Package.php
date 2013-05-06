@@ -2,6 +2,7 @@
 
 class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Package {
 
+    protected $_fallbackConfigXml = null;
 
 	/**
 	 * Check for files existence by specified scheme
@@ -12,15 +13,10 @@ class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Pac
 	 * @return string
 	 */
 	protected function _fallback($file, array &$params, array $fallbackScheme = array(array())) {
-        /** @var $store Mage_Core_Model_Store */
-        $store = $params['_store'];
-        if (! is_object($store)) {
-            $store = Mage::app()->getStore($store);
-        }
-
-        if ($store->isAdmin()) {
+        if ($params['_area'] !== 'frontend') {
             return parent::_fallback($file, $params, $fallbackScheme);
         } else {
+
             return parent::_fallback($file, $params, $this->getFallbackScheme($params));
         }
 	}
@@ -32,7 +28,16 @@ class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Pac
 	 * @return array
 	 */
 	public function getFallbackScheme(array $defaults=array()) {
-		$configuration = Mage::getStoreConfig('design/fallback/fallback', $defaults['_store']);
+
+        /** @var Varien_Simplexml_Element $fallbackConfig */
+        $fallbackConfig = $this->getFallbackConfig($defaults);
+
+        if ($fallbackConfig && (string) $fallbackConfig->fallback) {
+            $configuration = (string) $fallbackConfig->fallback;
+        } else {
+    		$configuration = Mage::getStoreConfig('design/fallback/fallback', $defaults['_store']);
+        }
+
 		$fallbackScheme = array();
 		foreach (explode("\n", $configuration) as $line) {
 			if (strpos($line, ':') === false) {
@@ -42,7 +47,7 @@ class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Pac
 
 			$packageName = $this->resolveConfiguration($packageName);
 			if (!empty($packageName)) { // empty values will be evaluated to current package ...
-				if (!$this->designPackageExists($packageName, $this->getArea())) {
+				if (!$this->designPackageExists($packageName, $defaults['_area'])) {
 					// Mage::log(sprintf('Could not find package "%s". Using "%s" instead.', $packageName, Mage_Core_Model_Design_Package::DEFAULT_PACKAGE));
 					$packageName = Mage_Core_Model_Design_Package::DEFAULT_PACKAGE;
 				}
@@ -75,6 +80,36 @@ class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Pac
 		return $fallbackScheme;
 	}
 
+
+    /**
+     * Load widget XML config and merge with theme widget config
+     *
+     * @param array $defaults
+     *
+     * @return Varien_Simplexml_Element
+     */
+    protected function getFallbackConfig($defaults) {
+        if ($this->_fallbackConfigXml === null) {
+            $configFile = Mage::getSingleton('core/design_package')->getBaseDir(array(
+                '_area'    => $defaults['_area'],
+                '_package' => $defaults['_package'],
+                '_theme'   => $defaults['_theme'],
+                '_type'    => 'etc'
+            )) . DS . 'fallback.xml';
+
+            if (is_readable($configFile)) {
+                $themeFallbackConfig = new Varien_Simplexml_Config();
+                $themeFallbackConfig->loadFile($configFile);
+                if ($themeWidgetTypeConfig = $themeFallbackConfig->getNode('fallback')) {
+                    $this->_fallbackConfigXml = $themeWidgetTypeConfig;
+                }
+            } else {
+                $this->_fallbackConfigXml = false;
+            }
+        }
+        return $this->_fallbackConfigXml;
+    }
+
 	/**
 	 * Resolve configuration.
 	 * Values wrapped in {...} will be looked up in configuration.
@@ -88,7 +123,7 @@ class Aoe_DesignFallback_Model_Design_Package extends Mage_Core_Model_Design_Pac
 		if (strtolower($value == '[current]')) {
 			// empty value will be in ->updateParamDefaults().
 			// to the current package and theme taking type-specific themes and design changed (System -> Design) into account
-			$value = NULL;
+			$value = null;
 		} elseif ($value[0] == '{' && $value[strlen($value)-1] == '}') {
 			$value = substr($value, 1, -1);
 			$value = Mage::getStoreConfig($value, $this->getStore());
